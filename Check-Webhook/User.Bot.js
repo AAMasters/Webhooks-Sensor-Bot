@@ -41,10 +41,11 @@ exports.newUserBot = function newUserBot(bot, logger, COMMONS, UTILITIES, FILE_S
                 return
             }
 
-            getContextVariables()
-            saveMessages()
+            let fileContent
+
+            getContextVariables(saveMessages)
  
-            function getContextVariables() {
+            function getContextVariables(callBack) {
 
                 try {
                     let reportKey;
@@ -60,6 +61,26 @@ exports.newUserBot = function newUserBot(bot, logger, COMMONS, UTILITIES, FILE_S
                     }
 
                     thisReport = statusDependencies.statusReports.get(reportKey)
+
+                    if (thisReport.file.lasrRun !== undefined) {
+                        let fileName = 'Data.json'
+                        let filePath = bot.filePathRoot + "/Output/" + FOLDER_NAME
+                        fileStorage.getTextFile(filePath + '/' + fileName, onFileReceived);
+
+                        function onFileReceived(err, text) {
+                            if (err.result !== global.DEFAULT_OK_RESPONSE.result) {
+                                logger.write(MODULE_NAME, "[ERROR] start -> getContextVariables -> onFileReceived -> Could read file. ->  filePath = " + filePath + "/" + fileName);
+                                callBackFunction(global.DEFAULT_FAIL_RESPONSE);
+                            } else {
+
+                                fileContent = text
+                                callBack()
+                            }
+                        }
+                    } else { // If there is no status report, we assume there is no previous file or that if there is we will override it.
+                        callBack()
+                    } 
+
 
                 } catch (err) {
                     logger.write(MODULE_NAME, "[ERROR] start -> getContextVariables -> err = " + err.stack);
@@ -93,15 +114,33 @@ exports.newUserBot = function newUserBot(bot, logger, COMMONS, UTILITIES, FILE_S
                         function onEnd() {
                             let messages = Buffer.concat(chunks).toString('utf8')
 
+                            if (fileContent !== undefined) {
+                                // we are going to append the curernt messages to the existing file.
+                                let fileContentArray = JSON.parse(fileContent)
+                                let messagesArray = JSON.parse(messages) 
+
+                                for (let i = 0; i < messagesArray.length; i++) {
+                                    let message = messagesArray[i]
+                                    fileContentArray.push(message)
+                                }
+
+                                fileContent = JSON.stringify(fileContentArray)
+                            } else {
+                                // we are going to save the current messages.
+                                fileContent = messages
+                            }
+
                             let fileName = 'Data.json'
                             let filePath = bot.filePathRoot + "/Output/" + FOLDER_NAME
-                            fileStorage.createTextFile(filePath + '/' + fileName, messages + '\n', onFileCreated);
-
+                            fileStorage.createTextFile(filePath + '/' + fileName, fileContent + '\n', onFileCreated);
 
                             function onFileCreated(err) {
-
-                                console.log('on file created err: ' + err)
-                                writeStatusReport()
+                                if (err.result !== global.DEFAULT_OK_RESPONSE.result) {
+                                    logger.write(MODULE_NAME, "[ERROR] start -> saveMessages -> onResponse -> onEnd -> onFileCreated -> Could not save file. ->  filePath = " + filePath + "/" + fileName);
+                                    callBackFunction(global.DEFAULT_FAIL_RESPONSE);
+                                } else {
+                                    writeStatusReport()
+                                }
                             }
                         }
                     }
@@ -116,7 +155,9 @@ exports.newUserBot = function newUserBot(bot, logger, COMMONS, UTILITIES, FILE_S
             function writeStatusReport() {
                 try {
    
-                    thisReport.file = {};
+                    thisReport.file = {
+                        lasrRun: (new Date()).toISOString()
+                    };
 
                     thisReport.save(onSaved);
 
